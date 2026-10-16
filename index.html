@@ -49,6 +49,22 @@
       gap: 10px;
     }
 
+    .title-badge {
+      margin-top: 6px;
+      margin-bottom: auto;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 6px 18px rgba(58, 42, 26, 0.1);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text) 90%, #ffffff 10%);
+      backdrop-filter: blur(5px);
+    }
+
     .status {
       min-height: 20px;
       font-size: 0.88rem;
@@ -58,6 +74,7 @@
       border: 1px solid rgba(255, 255, 255, 0.9);
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
       opacity: 0.9;
+      transition: opacity 0.25s ease;
     }
 
     .status.ok {
@@ -77,6 +94,20 @@
       display: flex;
       justify-content: center;
       gap: 10px;
+    }
+
+    .season-row,
+    .toggle-wrap {
+      width: min(520px, 100%);
+    }
+
+    .season-row {
+      padding: 6px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(4px);
+      box-shadow: 0 8px 20px rgba(52, 39, 24, 0.1);
     }
 
     .input-row {
@@ -132,6 +163,7 @@
       padding: 11px 20px;
       box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 38%, transparent);
       letter-spacing: 0.01em;
+      min-width: 220px;
     }
 
     .season-btn[data-season="spring"] { background: #f2f7ea; }
@@ -156,6 +188,7 @@
 <body>
   <div id="app">
     <div class="ui">
+      <div class="title-badge">Voxel QR Tree</div>
       <div id="status" class="status" aria-live="polite"></div>
 
       <div class="toggle-wrap">
@@ -228,6 +261,7 @@
     let blockEntries = [];
     let leafMaterial = null;
     let trunkMaterial = null;
+    let statusTimer = null;
 
     const palettes = {
       spring: {
@@ -260,9 +294,19 @@
     };
 
     function setStatus(message, isError = false) {
+      if (statusTimer) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+      }
       statusEl.textContent = message || '';
       statusEl.classList.toggle('error', Boolean(isError));
       statusEl.classList.toggle('ok', Boolean(message) && !isError);
+      statusEl.style.opacity = message ? '0.92' : '0';
+      if (message && !isError) {
+        statusTimer = setTimeout(() => {
+          statusEl.style.opacity = '0';
+        }, 2400);
+      }
     }
 
     function normalizeUrl(raw) {
@@ -504,6 +548,7 @@
     function setView(diorama) {
       isDiorama = diorama;
       toggleViewBtn.textContent = diorama ? 'Tap to see QR code' : 'Tap to see the tree';
+      gsap.fromTo(toggleViewBtn, { scale: 0.97 }, { scale: 1, duration: 0.32, ease: 'back.out(2.4)' });
 
       // Cambio de vista: pose ortográfica top-down <-> pose isométrica fija.
       const distance = Math.max(30, qrWorldSize * 1.35);
@@ -572,6 +617,7 @@
 
     function init() {
       urlInput.value = 'https://github.com/Diegood-02/Arbol_qr';
+      statusEl.style.opacity = '0';
       regenerateQrFromInput();
       setView(false);
 
@@ -588,7 +634,10 @@
       });
 
       seasonButtons.forEach((button) => {
-        button.addEventListener('click', () => applySeason(button.dataset.season));
+        button.addEventListener('click', () => {
+          gsap.fromTo(button, { y: 0 }, { y: -2, duration: 0.14, yoyo: true, repeat: 1, ease: 'power1.inOut' });
+          applySeason(button.dataset.season);
+        });
       });
 
       window.addEventListener('resize', onResize);
@@ -610,6 +659,12 @@
           attr.array[i * 3 + 1] = y;
         }
         attr.needsUpdate = true;
+      }
+
+      if (isDiorama && treeGroup.visible) {
+        treeGroup.rotation.y = Math.sin(performance.now() * 0.00045) * 0.08;
+      } else {
+        treeGroup.rotation.y *= 0.86;
       }
 
       camera.lookAt(0, 0, 0);
