@@ -8,8 +8,10 @@
     :root {
       --cream: #F4F0E6;
       --text: #2f2b25;
-      --panel: rgba(255, 255, 255, 0.85);
+      --panel: rgba(255, 255, 255, 0.8);
+      --panel-border: rgba(255, 255, 255, 0.7);
       --accent: #2c7a4b;
+      --shadow: 0 10px 28px rgba(52, 40, 25, 0.14);
     }
 
     * { box-sizing: border-box; }
@@ -43,16 +45,23 @@
       flex-direction: column;
       justify-content: flex-end;
       align-items: center;
-      padding: 16px;
+      padding: 18px;
       gap: 10px;
     }
 
     .status {
       min-height: 20px;
       font-size: 0.88rem;
-      padding: 2px 8px;
+      padding: 4px 10px;
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+      opacity: 0.9;
+    }
+
+    .status.ok {
+      color: #215b3a;
     }
 
     .status.error {
@@ -74,7 +83,9 @@
       background: var(--panel);
       border-radius: 14px;
       padding: 10px;
-      backdrop-filter: blur(2px);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(5px);
+      box-shadow: var(--shadow);
     }
 
     input[type="url"] {
@@ -88,6 +99,12 @@
       color: var(--text);
     }
 
+    input[type="url"]:focus {
+      outline: none;
+      border-color: rgba(44, 122, 75, 0.45);
+      box-shadow: 0 0 0 3px rgba(44, 122, 75, 0.16);
+    }
+
     button {
       border: none;
       border-radius: 10px;
@@ -97,23 +114,36 @@
       background: #ffffff;
       color: var(--text);
       cursor: pointer;
-      transition: transform 0.12s ease, opacity 0.12s ease;
+      transition: transform 0.16s ease, opacity 0.16s ease, box-shadow 0.2s ease, background-color 0.2s ease;
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
       white-space: nowrap;
     }
 
-    button:hover { transform: translateY(-1px); }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    }
     button:active { transform: translateY(0); }
 
     .toggle-btn {
-      background: var(--accent);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 92%, #ffffff 8%), var(--accent));
       color: #fff;
       border-radius: 999px;
-      padding-inline: 18px;
+      padding: 11px 20px;
+      box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 38%, transparent);
+      letter-spacing: 0.01em;
+    }
+
+    .season-btn[data-season="spring"] { background: #f2f7ea; }
+    .season-btn[data-season="summer"] { background: #f7f5dd; }
+    .season-btn[data-season="autumn"] { background: #f9e8dd; }
+
+    .season-btn {
+      min-width: 102px;
     }
 
     .season-btn.active {
-      outline: 2px solid rgba(0, 0, 0, 0.22);
+      outline: 2px solid rgba(0, 0, 0, 0.26);
       transform: translateY(-1px);
     }
 
@@ -201,31 +231,38 @@
 
     const palettes = {
       spring: {
-        dark: '#1f5d3b',
-        light: '#f2eee3',
-        leaves: '#8ecf8f',
-        accents: '#f4a6bc',
-        trunk: '#7a5438'
+        dark: '#295f42',
+        light: '#f3efe2',
+        leaves: '#90cf91',
+        accents: '#eca9ba',
+        trunk: '#7b573c',
+        uiAccent: '#4f8f6a',
+        particle: '#d0845f'
       },
       summer: {
-        dark: '#1a452a',
+        dark: '#1b4f30',
         light: '#f8f5ea',
-        leaves: '#42a347',
-        accents: '#d6c95e',
-        trunk: '#6e4a2d'
+        leaves: '#46a64e',
+        accents: '#dac961',
+        trunk: '#6d4c2f',
+        uiAccent: '#2c7a4b',
+        particle: '#b48757'
       },
       autumn: {
-        dark: '#5f3422',
+        dark: '#613a2a',
         light: '#f4e7d5',
-        leaves: '#c8682a',
-        accents: '#9c3e27',
-        trunk: '#5a3b29'
+        leaves: '#c96c2e',
+        accents: '#9e3f2a',
+        trunk: '#5b3c2b',
+        uiAccent: '#8d4f31',
+        particle: '#b45b2a'
       }
     };
 
     function setStatus(message, isError = false) {
       statusEl.textContent = message || '';
       statusEl.classList.toggle('error', Boolean(isError));
+      statusEl.classList.toggle('ok', Boolean(message) && !isError);
     }
 
     function normalizeUrl(raw) {
@@ -282,6 +319,11 @@
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4.5, 10), trunkMaterial);
       trunk.position.y = 2.25;
       treeGroup.add(trunk);
+
+      const upperTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.1, 10), trunkMaterial);
+      upperTrunk.position.y = 5.35;
+      upperTrunk.rotation.z = 0.08;
+      treeGroup.add(upperTrunk);
 
       const crown = new THREE.Group();
       treeGroup.add(crown);
@@ -451,8 +493,12 @@
       }
 
       if (particles) {
+        const pColor = new THREE.Color(palette.particle);
+        gsap.to(particles.material.color, { r: pColor.r, g: pColor.g, b: pColor.b, duration: 0.65, ease: 'power1.inOut' });
         particles.visible = season === 'autumn';
       }
+
+      document.documentElement.style.setProperty('--accent', palette.uiAccent);
     }
 
     function setView(diorama) {
@@ -460,8 +506,9 @@
       toggleViewBtn.textContent = diorama ? 'Tap to see QR code' : 'Tap to see the tree';
 
       // Cambio de vista: pose ortográfica top-down <-> pose isométrica fija.
+      const distance = Math.max(30, qrWorldSize * 1.35);
       const targetPos = diorama
-        ? { x: 28, y: 32, z: 28 }
+        ? { x: distance, y: distance, z: distance }
         : { x: 0, y: 80, z: 0 };
       const targetUp = diorama
         ? { x: 0, y: 1, z: 0 }
@@ -479,6 +526,13 @@
         duration: 1,
         ease: 'power2.inOut',
         onUpdate: () => camera.lookAt(0, 0, 0)
+      });
+
+      gsap.to(camera, {
+        zoom: diorama ? 1.15 : 1,
+        duration: 1,
+        ease: 'power2.inOut',
+        onUpdate: () => camera.updateProjectionMatrix()
       });
 
       if (diorama) {
