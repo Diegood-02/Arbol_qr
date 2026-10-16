@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Árbol QR Voxel</title>
+  <style>
+    :root {
+      --cream: #F4F0E6;
+      --text: #2f2b25;
+      --panel: rgba(255, 255, 255, 0.8);
+      --panel-border: rgba(255, 255, 255, 0.7);
+      --accent: #2c7a4b;
+      --shadow: 0 10px 28px rgba(52, 40, 25, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--cream);
+      color: var(--text);
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .ui {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 18px;
+      gap: 10px;
+    }
+
+    .title-badge {
+      margin-top: 6px;
+      margin-bottom: auto;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 6px 18px rgba(58, 42, 26, 0.1);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text) 90%, #ffffff 10%);
+      backdrop-filter: blur(5px);
+    }
+
+    .status {
+      min-height: 20px;
+      font-size: 0.88rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+      opacity: 0.9;
+      transition: opacity 0.25s ease;
+    }
+
+    .status.ok {
+      color: #215b3a;
+    }
+
+    .status.error {
+      color: #b42318;
+      background: rgba(255, 228, 228, 0.9);
+    }
+
+    .season-row,
+    .input-row,
+    .toggle-wrap {
+      pointer-events: auto;
+      width: min(640px, 100%);
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .season-row,
+    .toggle-wrap {
+      width: min(520px, 100%);
+    }
+
+    .season-row {
+      padding: 6px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(4px);
+      box-shadow: 0 8px 20px rgba(52, 39, 24, 0.1);
+    }
+
+    .input-row {
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 10px;
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(5px);
+      box-shadow: var(--shadow);
+    }
+
+    input[type="url"] {
+      flex: 1;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+      min-width: 0;
+      background: white;
+      color: var(--text);
+    }
+
+    input[type="url"]:focus {
+      outline: none;
+      border-color: rgba(44, 122, 75, 0.45);
+      box-shadow: 0 0 0 3px rgba(44, 122, 75, 0.16);
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      background: #ffffff;
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 0.16s ease, opacity 0.16s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+      white-space: nowrap;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    }
+    button:active { transform: translateY(0); }
+
+    .toggle-btn {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 92%, #ffffff 8%), var(--accent));
+      color: #fff;
+      border-radius: 999px;
+      padding: 11px 20px;
+      box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 38%, transparent);
+      letter-spacing: 0.01em;
+      min-width: 220px;
+    }
+
+    .season-btn[data-season="spring"] { background: #f2f7ea; }
+    .season-btn[data-season="summer"] { background: #f7f5dd; }
+    .season-btn[data-season="autumn"] { background: #f9e8dd; }
+
+    .season-btn {
+      min-width: 102px;
+    }
+
+    .season-btn.active {
+      outline: 2px solid rgba(0, 0, 0, 0.26);
+      transform: translateY(-1px);
+    }
+
+    @media (max-width: 560px) {
+      .season-row { gap: 8px; }
+      button { font-size: 0.84rem; padding: 9px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="ui">
+      <div class="title-badge">Voxel QR Tree</div>
+      <div id="status" class="status" aria-live="polite"></div>
+
+      <div class="toggle-wrap">
+        <button id="toggleViewBtn" class="toggle-btn">Tap to see the tree</button>
+      </div>
+
+      <div class="input-row">
+        <input id="urlInput" type="url" placeholder="https://example.com" />
+        <button id="generateBtn">Actualizar QR</button>
+      </div>
+
+      <div class="season-row">
+        <button class="season-btn" data-season="spring">Spring</button>
+        <button class="season-btn active" data-season="summer">Summer</button>
+        <button class="season-btn" data-season="autumn">Autumn</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script>
+    const app = document.getElementById('app');
+    const urlInput = document.getElementById('urlInput');
+    const generateBtn = document.getElementById('generateBtn');
+    const toggleViewBtn = document.getElementById('toggleViewBtn');
+    const statusEl = document.getElementById('status');
+    const seasonButtons = Array.from(document.querySelectorAll('.season-btn'));
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#F4F0E6');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = false;
+    app.prepend(renderer.domElement);
+
+    const camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 500);
+    camera.position.set(0, 80, 0);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, 0, 0);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 1.3));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.45);
+    sun.position.set(18, 30, 12);
+    scene.add(sun);
+
+    const world = new THREE.Group();
+    scene.add(world);
+
+    let qrGroup = new THREE.Group();
+    world.add(qrGroup);
+
+    const treeGroup = new THREE.Group();
+    world.add(treeGroup);
+
+    let particles = null;
+    let particleVelocities = [];
+
+    const cellSize = 1;
+    const quietZone = 4;
+    const qrFlatHeight = 0.1;
+
+    let qrWorldSize = 21;
+    let viewSize = 28;
+    let isDiorama = false;
+    let currentSeason = 'summer';
+    let blockEntries = [];
+    let leafMaterial = null;
+    let trunkMaterial = null;
+    let statusTimer = null;
+
+    const palettes = {
+      spring: {
+        dark: '#295f42',
+        light: '#f3efe2',
+        leaves: '#90cf91',
+        accents: '#eca9ba',
+        trunk: '#7b573c',
+        uiAccent: '#4f8f6a',
+        particle: '#d0845f'
+      },
+      summer: {
+        dark: '#1b4f30',
+        light: '#f8f5ea',
+        leaves: '#46a64e',
+        accents: '#dac961',
+        trunk: '#6d4c2f',
+        uiAccent: '#2c7a4b',
+        particle: '#b48757'
+      },
+      autumn: {
+        dark: '#613a2a',
+        light: '#f4e7d5',
+        leaves: '#c96c2e',
+        accents: '#9e3f2a',
+        trunk: '#5b3c2b',
+        uiAccent: '#8d4f31',
+        particle: '#b45b2a'
+      }
+    };
+
+    function setStatus(message, isError = false) {
+      if (statusTimer) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+      }
+      statusEl.textContent = message || '';
+      statusEl.classList.toggle('error', Boolean(isError));
+      statusEl.classList.toggle('ok', Boolean(message) && !isError);
+      statusEl.style.opacity = message ? '0.92' : '0';
+      if (message && !isError) {
+        statusTimer = setTimeout(() => {
+          statusEl.style.opacity = '0';
+        }, 2400);
+      }
+    }
+
+    function normalizeUrl(raw) {
+      const value = raw.trim();
+      if (!value) throw new Error('Ingresa una URL.');
+      try {
+        return new URL(value).toString();
+      } catch {
+        if (/^[\w.-]+\.[A-Za-z]{2,}(\/.*)?$/.test(value)) {
+          return new URL(`https://${value}`).toString();
+        }
+      }
+      throw new Error('URL inválida. Usa formato https://dominio.com');
+    }
+
+    function makeQrMatrix(url) {
+      // Generación QR con librería ligera y control de tamaño para rendimiento.
+      const qr = qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      const count = qr.getModuleCount();
+      if (count > 65) {
+        throw new Error('La URL es muy larga para este modo voxel.');
+      }
+      const matrix = [];
+      for (let row = 0; row < count; row++) {
+        const values = [];
+        for (let col = 0; col < count; col++) {
+          values.push(qr.isDark(row, col));
+        }
+        matrix.push(values);
+      }
+      return matrix;
+    }
+
+    function clearGroup(group) {
+      while (group.children.length) {
+        const child = group.children.pop();
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+          else child.material.dispose();
+        }
+      }
+    }
+
+    function buildTree() {
+      clearGroup(treeGroup);
+
+      trunkMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].trunk, transparent: true, opacity: 0 });
+      leafMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].leaves, transparent: true, opacity: 0 });
+
+      // Árbol procedural centrado matemáticamente en (0,0,0), eje del QR.
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4.5, 10), trunkMaterial);
+      trunk.position.y = 2.25;
+      treeGroup.add(trunk);
+
+      const upperTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.1, 10), trunkMaterial);
+      upperTrunk.position.y = 5.35;
+      upperTrunk.rotation.z = 0.08;
+      treeGroup.add(upperTrunk);
+
+      const crown = new THREE.Group();
+      treeGroup.add(crown);
+
+      const crownGeometry = new THREE.SphereGeometry(1.4, 14, 10);
+      const offsets = [
+        [0, 5.1, 0], [1.0, 4.8, 0.6], [-1.1, 4.9, 0.5], [0.6, 5.4, -1.0], [-0.8, 5.4, -0.8],
+      ];
+      offsets.forEach(([x, y, z], i) => {
+        const blob = new THREE.Mesh(crownGeometry, leafMaterial);
+        blob.position.set(x, y, z);
+        blob.scale.setScalar(i === 0 ? 1.1 : 0.85);
+        crown.add(blob);
+      });
+
+      const accentGeometry = new THREE.BoxGeometry(0.55, 0.55, 0.55);
+      const accentMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].accents, transparent: true, opacity: 0 });
+      for (let i = 0; i < 8; i++) {
+        const cube = new THREE.Mesh(accentGeometry, accentMaterial);
+        cube.position.set((Math.random() - 0.5) * 2.8, 4.2 + Math.random() * 1.5, (Math.random() - 0.5) * 2.8);
+        crown.add(cube);
+      }
+
+      treeGroup.scale.setScalar(0.001);
+      treeGroup.visible = false;
+    }
+
+    function buildParticles() {
+      if (particles) {
+        particles.geometry.dispose();
+        particles.material.dispose();
+        world.remove(particles);
+      }
+      const count = 180;
+      const pos = new Float32Array(count * 3);
+      particleVelocities = new Array(count);
+
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] = (Math.random() - 0.5) * (qrWorldSize + 10);
+        pos[i * 3 + 1] = 5 + Math.random() * 10;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * (qrWorldSize + 10);
+        particleVelocities[i] = 0.015 + Math.random() * 0.04;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+
+      // Partículas simples de otoño (hojas/lluvia) sin costo alto.
+      const mat = new THREE.PointsMaterial({ color: 0xa85b2d, size: 0.17, transparent: true, opacity: 0.75 });
+      particles = new THREE.Points(geo, mat);
+      particles.visible = false;
+      world.add(particles);
+    }
+
+    function buildQr(matrix) {
+      clearGroup(qrGroup);
+      blockEntries = [];
+
+      const moduleCount = matrix.length;
+      const fullCount = moduleCount + quietZone * 2;
+      qrWorldSize = fullCount * cellSize;
+      viewSize = Math.max(22, qrWorldSize * 1.14);
+
+      const darkMaterial = new THREE.MeshBasicMaterial({ color: palettes[currentSeason].dark });
+      const lightMaterial = new THREE.MeshBasicMaterial({ color: palettes[currentSeason].light });
+      const geo = new THREE.BoxGeometry(cellSize, 1, cellSize);
+
+      // Alineación matemática estable: celda (row,col) -> X/Z centrado en 0.
+      const centerOffset = (fullCount - 1) / 2;
+      for (let row = 0; row < fullCount; row++) {
+        for (let col = 0; col < fullCount; col++) {
+          const inQr = row >= quietZone && row < fullCount - quietZone && col >= quietZone && col < fullCount - quietZone;
+          const dark = inQr ? matrix[row - quietZone][col - quietZone] : false;
+          const mesh = new THREE.Mesh(geo, dark ? darkMaterial : lightMaterial);
+
+          const x = (col - centerOffset) * cellSize;
+          const z = (row - centerOffset) * cellSize;
+
+          mesh.position.set(x, qrFlatHeight / 2, z);
+          mesh.scale.set(0.98, qrFlatHeight, 0.98);
+
+          qrGroup.add(mesh);
+          blockEntries.push({ mesh, dark });
+        }
+      }
+
+      updateCameraFrustum();
+      buildTree();
+      buildParticles();
+    }
+
+    function updateCameraFrustum() {
+      const aspect = window.innerWidth / window.innerHeight;
+      const halfH = viewSize / 2;
+      const halfW = halfH * aspect;
+      camera.left = -halfW;
+      camera.right = halfW;
+      camera.top = halfH;
+      camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
+
+    function animateBlocksToQr() {
+      blockEntries.forEach(({ mesh }) => {
+        gsap.to(mesh.scale, { y: qrFlatHeight, duration: 0.65, ease: 'power2.inOut' });
+        gsap.to(mesh.position, { y: qrFlatHeight / 2, duration: 0.65, ease: 'power2.inOut' });
+      });
+    }
+
+    function animateBlocksToDiorama() {
+      blockEntries.forEach(({ mesh, dark }) => {
+        const target = dark ? 0.35 + Math.random() * 0.95 : 0.18 + Math.random() * 0.4;
+        gsap.to(mesh.scale, { y: target, duration: 0.9, ease: 'power2.out' });
+        gsap.to(mesh.position, { y: target / 2, duration: 0.9, ease: 'power2.out' });
+      });
+    }
+
+    function showTree() {
+      treeGroup.visible = true;
+      gsap.to(treeGroup.scale, { x: 1, y: 1, z: 1, duration: 0.9, ease: 'back.out(1.6)' });
+      treeGroup.traverse((node) => {
+        if (node.material && node.material.transparent) {
+          gsap.to(node.material, { opacity: 1, duration: 0.6, ease: 'power2.out' });
+        }
+      });
+    }
+
+    function hideTree() {
+      gsap.to(treeGroup.scale, {
+        x: 0.001,
+        y: 0.001,
+        z: 0.001,
+        duration: 0.4,
+        ease: 'power2.inOut',
+        onComplete: () => { treeGroup.visible = false; }
+      });
+      treeGroup.traverse((node) => {
+        if (node.material && node.material.transparent) {
+          gsap.to(node.material, { opacity: 0, duration: 0.35, ease: 'power2.inOut' });
+        }
+      });
+    }
+
+    function setSeasonButtonState(season) {
+      seasonButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.season === season);
+      });
+    }
+
+    function applySeason(season) {
+      currentSeason = season;
+      setSeasonButtonState(season);
+      const palette = palettes[season];
+
+      blockEntries.forEach(({ mesh, dark }) => {
+        const target = new THREE.Color(dark ? palette.dark : palette.light);
+        gsap.to(mesh.material.color, { r: target.r, g: target.g, b: target.b, duration: 0.7, ease: 'power1.inOut' });
+      });
+
+      if (leafMaterial) {
+        const leafColor = new THREE.Color(palette.leaves);
+        gsap.to(leafMaterial.color, { r: leafColor.r, g: leafColor.g, b: leafColor.b, duration: 0.75, ease: 'power1.inOut' });
+      }
+      if (trunkMaterial) {
+        const trunkColor = new THREE.Color(palette.trunk);
+        gsap.to(trunkMaterial.color, { r: trunkColor.r, g: trunkColor.g, b: trunkColor.b, duration: 0.75, ease: 'power1.inOut' });
+      }
+
+      if (particles) {
+        const pColor = new THREE.Color(palette.particle);
+        gsap.to(particles.material.color, { r: pColor.r, g: pColor.g, b: pColor.b, duration: 0.65, ease: 'power1.inOut' });
+        particles.visible = season === 'autumn';
+      }
+
+      document.documentElement.style.setProperty('--accent', palette.uiAccent);
+    }
+
+    function setView(diorama) {
+      isDiorama = diorama;
+      toggleViewBtn.textContent = diorama ? 'Tap to see QR code' : 'Tap to see the tree';
+      gsap.fromTo(toggleViewBtn, { scale: 0.97 }, { scale: 1, duration: 0.32, ease: 'back.out(2.4)' });
+
+      // Cambio de vista: pose ortográfica top-down <-> pose isométrica fija.
+      const distance = Math.max(30, qrWorldSize * 1.35);
+      const targetPos = diorama
+        ? { x: distance, y: distance, z: distance }
+        : { x: 0, y: 80, z: 0 };
+      const targetUp = diorama
+        ? { x: 0, y: 1, z: 0 }
+        : { x: 0, y: 0, z: -1 };
+
+      gsap.to(camera.position, {
+        ...targetPos,
+        duration: 1,
+        ease: 'power2.inOut',
+        onUpdate: () => camera.lookAt(0, 0, 0)
+      });
+
+      gsap.to(camera.up, {
+        ...targetUp,
+        duration: 1,
+        ease: 'power2.inOut',
+        onUpdate: () => camera.lookAt(0, 0, 0)
+      });
+
+      gsap.to(camera, {
+        zoom: diorama ? 1.15 : 1,
+        duration: 1,
+        ease: 'power2.inOut',
+        onUpdate: () => camera.updateProjectionMatrix()
+      });
+
+      if (diorama) {
+        animateBlocksToDiorama();
+        showTree();
+      } else {
+        animateBlocksToQr();
+        hideTree();
+      }
+    }
+
+    function regenerateQrFromInput() {
+      try {
+        const normalized = normalizeUrl(urlInput.value);
+        const matrix = makeQrMatrix(normalized);
+        urlInput.value = normalized;
+        buildQr(matrix);
+        applySeason(currentSeason);
+        if (isDiorama) {
+          animateBlocksToDiorama();
+          showTree();
+        } else {
+          animateBlocksToQr();
+          hideTree();
+          setView(false);
+        }
+        setStatus('QR actualizado correctamente.');
+      } catch (error) {
+        setStatus(error.message || 'No se pudo generar el QR.', true);
+      }
+    }
+
+    function onResize() {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      updateCameraFrustum();
+    }
+
+    function init() {
+      urlInput.value = 'https://github.com/Diegood-02/Arbol_qr';
+      statusEl.style.opacity = '0';
+      regenerateQrFromInput();
+      setView(false);
+
+      generateBtn.addEventListener('click', regenerateQrFromInput);
+      urlInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          regenerateQrFromInput();
+        }
+      });
+
+      toggleViewBtn.addEventListener('click', () => {
+        setView(!isDiorama);
+      });
+
+      seasonButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          gsap.fromTo(button, { y: 0 }, { y: -2, duration: 0.14, yoyo: true, repeat: 1, ease: 'power1.inOut' });
+          applySeason(button.dataset.season);
+        });
+      });
+
+      window.addEventListener('resize', onResize);
+    }
+
+    function tick() {
+      requestAnimationFrame(tick);
+
+      if (particles && particles.visible) {
+        const attr = particles.geometry.getAttribute('position');
+        for (let i = 0; i < attr.count; i++) {
+          let y = attr.array[i * 3 + 1];
+          y -= particleVelocities[i];
+          if (y < 0.2) {
+            y = 6 + Math.random() * 10;
+            attr.array[i * 3] = (Math.random() - 0.5) * (qrWorldSize + 10);
+            attr.array[i * 3 + 2] = (Math.random() - 0.5) * (qrWorldSize + 10);
+          }
+          attr.array[i * 3 + 1] = y;
+        }
+        attr.needsUpdate = true;
+      }
+
+      if (isDiorama && treeGroup.visible) {
+        treeGroup.rotation.y = Math.sin(performance.now() * 0.00045) * 0.08;
+      } else {
+        treeGroup.rotation.y *= 0.86;
+      }
+
+      camera.lookAt(0, 0, 0);
+      renderer.render(scene, camera);
+    }
+
+    init();
+    tick();
+  </script>
+</body>
+</html>
