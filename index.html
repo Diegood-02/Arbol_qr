@@ -20,7 +20,7 @@
       margin: 0;
       overflow: hidden;
       font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: var(--cream);
+      background: radial-gradient(ellipse at 50% 38%, #fcf9f1 0%, #efe8d6 70%, #e4dcc7 100%);
       color: var(--text);
     }
 
@@ -219,13 +219,15 @@
     const statusEl = document.getElementById('status');
     const seasonButtons = Array.from(document.querySelectorAll('.season-btn'));
 
+    // ---------- Escena ----------
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#F4F0E6');
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = false;
+    renderer.setClearColor(0x000000, 0);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     app.prepend(renderer.domElement);
 
     const camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 500);
@@ -233,65 +235,100 @@
     camera.up.set(0, 0, -1);
     camera.lookAt(0, 0, 0);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.3));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.45);
-    sun.position.set(18, 30, 12);
-    scene.add(sun);
-
+    // El mundo gira como un tornamesa; la luz va dentro para que el sombreado no cambie al girar.
     const world = new THREE.Group();
     scene.add(world);
 
-    let qrGroup = new THREE.Group();
-    world.add(qrGroup);
+    const hemi = new THREE.HemisphereLight(0xfff6e4, 0x8d7a5e, 1.25);
+    world.add(hemi);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.04;
+    world.add(sun);
+    world.add(sun.target);
 
     const treeGroup = new THREE.Group();
     world.add(treeGroup);
 
-    let particles = null;
-    let particleVelocities = [];
-
+    // ---------- Estado ----------
     const cellSize = 1;
     const quietZone = 4;
     const qrFlatHeight = 0.1;
+    const dummy = new THREE.Object3D();
+    const tmpColor = new THREE.Color();
+    const tmpColor2 = new THREE.Color();
 
     let qrWorldSize = 21;
     let viewSize = 28;
     let isDiorama = false;
     let currentSeason = 'summer';
-    let blockEntries = [];
-    let leafMaterial = null;
-    let trunkMaterial = null;
     let statusTimer = null;
+
+    let qrMesh = null;
+    let plinth = null;
+    let detailMesh = null;
+    let treeMesh = null;
+    let particles = null;
+    let particleVelocities = [];
+    let entries = [];
+    let details = [];
+    let treeVoxels = [];
+    let treeScale = 0.6;
+    let treeBaseY = 0.3;
+
+    let qrDirty = false;
+    let colorsDirty = false;
+
+    const blockAnim = { p: 0 };   // 0 = QR plano, 1 = diorama (alturas)
+    const treeAnim = { n: 0 };    // fracción de voxels del árbol visibles
+    const dragState = { active: false, x: 0 };
 
     const palettes = {
       spring: {
-        dark: '#295f42',
-        light: '#f3efe2',
-        leaves: '#90cf91',
-        accents: '#eca9ba',
-        trunk: '#7b573c',
-        uiAccent: '#4f8f6a',
-        particle: '#d0845f'
+        dark: '#295f42', light: '#f3efe2', grass: '#b8da8c', leaves: '#8fd08f', accents: '#f1a7bd',
+        trunk: '#7b573c', soil: '#8a6446', particle: '#f1a7bd', uiAccent: '#4f8f6a'
       },
       summer: {
-        dark: '#1b4f30',
-        light: '#f8f5ea',
-        leaves: '#46a64e',
-        accents: '#dac961',
-        trunk: '#6d4c2f',
-        uiAccent: '#2c7a4b',
-        particle: '#b48757'
+        dark: '#1b4f30', light: '#f8f5ea', grass: '#8cc063', leaves: '#3f9f4c', accents: '#e7d45e',
+        trunk: '#6d4c2f', soil: '#7a5a3c', particle: '#b48757', uiAccent: '#2c7a4b'
       },
       autumn: {
-        dark: '#613a2a',
-        light: '#f4e7d5',
-        leaves: '#c96c2e',
-        accents: '#9e3f2a',
-        trunk: '#5b3c2b',
-        uiAccent: '#8d4f31',
-        particle: '#b45b2a'
+        dark: '#613a2a', light: '#f4e7d5', grass: '#c9a45c', leaves: '#d2762f', accents: '#a8412b',
+        trunk: '#5b3c2b', soil: '#6c4a34', particle: '#b45b2a', uiAccent: '#8d4f31'
       }
     };
+
+    // Colores "vivos" que gsap interpola al cambiar de estación.
+    const live = {};
+    Object.keys(palettes.summer).forEach((key) => {
+      if (key !== 'uiAccent') live[key] = new THREE.Color(palettes.summer[key]);
+    });
+
+    // ---------- Utilidades ----------
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function hashString(str) {
+      let h = 2166136261;
+      for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    }
+
+    function cellHash(row, col) {
+      const v = Math.sin(row * 12.9898 + col * 78.233) * 43758.5453;
+      return v - Math.floor(v);
+    }
 
     function setStatus(message, isError = false) {
       if (statusTimer) {
@@ -323,7 +360,6 @@
     }
 
     function makeQrMatrix(url) {
-      // Generación QR con librería ligera y control de tamaño para rendimiento.
       const qr = qrcode(0, 'M');
       qr.addData(url);
       qr.make();
@@ -342,121 +378,282 @@
       return matrix;
     }
 
-    function clearGroup(group) {
-      while (group.children.length) {
-        const child = group.children.pop();
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-          else child.material.dispose();
+    function disposeMesh(mesh) {
+      if (!mesh) return;
+      mesh.parent && mesh.parent.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      if (mesh.dispose) mesh.dispose();
+    }
+
+    // ---------- Árbol voxel procedural ----------
+    function generateTree(seed) {
+      const rnd = mulberry32(seed);
+      const voxels = new Map();
+      const key = (x, y, z) => (x + 64) + (y + 64) * 128 + (z + 64) * 16384;
+      const put = (x, y, z, kind) => {
+        const k = key(x, y, z);
+        const prev = voxels.get(k);
+        if (prev && prev.kind === 'trunk') return;
+        voxels.set(k, { x, y, z, kind, j: 0 });
+      };
+
+      const H = 26;
+      const phaseX = rnd() * 6.28;
+      const phaseZ = rnd() * 6.28;
+      const trunkX = (y) => Math.sin(y * 0.25 + phaseX) * 1.1 * (y / H);
+      const trunkZ = (y) => Math.cos(y * 0.21 + phaseZ) * 0.9 * (y / H);
+
+      // Tronco con raíces anchas y curvatura suave.
+      for (let y = 0; y <= H; y++) {
+        const r = 2.3 - 1.2 * (y / H) + (y < 3 ? (3 - y) * 0.45 : 0);
+        const cx = trunkX(y);
+        const cz = trunkZ(y);
+        for (let dx = -4; dx <= 4; dx++) {
+          for (let dz = -4; dz <= 4; dz++) {
+            if (dx * dx + dz * dz <= r * r) put(Math.round(cx + dx), y, Math.round(cz + dz), 'trunk');
+          }
         }
       }
-    }
 
-    function buildTree() {
-      clearGroup(treeGroup);
+      const blobs = [];
+      blobs.push({ x: trunkX(H), y: H + 2, z: trunkZ(H), r: 6.8 });
+      blobs.push({ x: trunkX(H - 3), y: H - 4, z: trunkZ(H - 3), r: 6.2 });
 
-      trunkMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].trunk, transparent: true, opacity: 0 });
-      leafMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].leaves, transparent: true, opacity: 0 });
+      // Ramas en espiral áurea, cada una termina en un racimo de hojas.
+      const branchCount = 6;
+      const a0 = rnd() * Math.PI * 2;
+      for (let i = 0; i < branchCount; i++) {
+        const ang = a0 + i * 2.4;
+        const startY = 12 + i * 2.1;
+        const length = 8 + rnd() * 4 - i * 0.4;
+        const dirX = Math.cos(ang);
+        const dirZ = Math.sin(ang);
+        const sx = trunkX(startY);
+        const sz = trunkZ(startY);
+        let ex = sx, ey = startY, ez = sz;
+        for (let t = 0; t <= length; t++) {
+          ex = sx + dirX * t;
+          ez = sz + dirZ * t;
+          ey = startY + t * 0.55;
+          const bx = Math.round(ex);
+          const by = Math.round(ey);
+          const bz = Math.round(ez);
+          put(bx, by, bz, 'trunk');
+          if (t < length * 0.5) {
+            put(bx + 1, by, bz, 'trunk');
+            put(bx, by, bz + 1, 'trunk');
+          }
+          if (t === Math.floor(length * 0.55)) {
+            blobs.push({ x: ex, y: ey + 1, z: ez, r: 3.6 + rnd() * 0.8 });
+          }
+        }
+        blobs.push({ x: ex, y: ey + 1.5, z: ez, r: 4.6 + rnd() * 1.6 });
+      }
 
-      // Árbol procedural centrado matemáticamente en (0,0,0), eje del QR.
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4.5, 10), trunkMaterial);
-      trunk.position.y = 2.25;
-      treeGroup.add(trunk);
-
-      const upperTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.1, 10), trunkMaterial);
-      upperTrunk.position.y = 5.35;
-      upperTrunk.rotation.z = 0.08;
-      treeGroup.add(upperTrunk);
-
-      const crown = new THREE.Group();
-      treeGroup.add(crown);
-
-      const crownGeometry = new THREE.SphereGeometry(1.4, 14, 10);
-      const offsets = [
-        [0, 5.1, 0], [1.0, 4.8, 0.6], [-1.1, 4.9, 0.5], [0.6, 5.4, -1.0], [-0.8, 5.4, -0.8],
-      ];
-      offsets.forEach(([x, y, z], i) => {
-        const blob = new THREE.Mesh(crownGeometry, leafMaterial);
-        blob.position.set(x, y, z);
-        blob.scale.setScalar(i === 0 ? 1.1 : 0.85);
-        crown.add(blob);
+      // Relleno de copas con borde irregular para que parezcan hojas, no esferas.
+      blobs.forEach((b) => {
+        const R = Math.ceil(b.r) + 1;
+        for (let x = -R; x <= R; x++) {
+          for (let y = -R; y <= R; y++) {
+            for (let z = -R; z <= R; z++) {
+              const wx = Math.round(b.x) + x;
+              const wy = Math.round(b.y) + y;
+              const wz = Math.round(b.z) + z;
+              if (wy < 12) continue;
+              const d = Math.sqrt(x * x + (y * 1.2) * (y * 1.2) + z * z) / b.r;
+              if (d < 0.78 + rnd() * 0.32) put(wx, wy, wz, rnd() < 0.09 ? 'accent' : 'leaf');
+            }
+          }
+        }
       });
 
-      const accentGeometry = new THREE.BoxGeometry(0.55, 0.55, 0.55);
-      const accentMaterial = new THREE.MeshLambertMaterial({ color: palettes[currentSeason].accents, transparent: true, opacity: 0 });
-      for (let i = 0; i < 8; i++) {
-        const cube = new THREE.Mesh(accentGeometry, accentMaterial);
-        cube.position.set((Math.random() - 0.5) * 2.8, 4.2 + Math.random() * 1.5, (Math.random() - 0.5) * 2.8);
-        crown.add(cube);
-      }
-
-      treeGroup.scale.setScalar(0.001);
-      treeGroup.visible = false;
+      // Quitar voxels interiores (invisibles) para aligerar el render.
+      const result = [];
+      let maxY = 0;
+      voxels.forEach((v) => {
+        const hidden = voxels.has(key(v.x + 1, v.y, v.z)) && voxels.has(key(v.x - 1, v.y, v.z))
+          && voxels.has(key(v.x, v.y + 1, v.z)) && voxels.has(key(v.x, v.y - 1, v.z))
+          && voxels.has(key(v.x, v.y, v.z + 1)) && voxels.has(key(v.x, v.y, v.z - 1));
+        if (hidden) return;
+        v.j = rnd() - 0.5;
+        maxY = Math.max(maxY, v.y);
+        result.push(v);
+      });
+      result.forEach((v) => { v.h = v.y / maxY; });
+      result.sort((a, b) => a.y - b.y);
+      return result;
     }
 
-    function buildParticles() {
-      if (particles) {
-        particles.geometry.dispose();
-        particles.material.dispose();
-        world.remove(particles);
-      }
-      const count = 180;
-      const pos = new Float32Array(count * 3);
-      particleVelocities = new Array(count);
+    function buildTree(seed) {
+      disposeMesh(treeMesh);
+      treeVoxels = generateTree(seed);
+      treeScale = Math.max(0.35, (qrWorldSize * 0.62) / 38);
 
-      for (let i = 0; i < count; i++) {
-        pos[i * 3] = (Math.random() - 0.5) * (qrWorldSize + 10);
-        pos[i * 3 + 1] = 5 + Math.random() * 10;
-        pos[i * 3 + 2] = (Math.random() - 0.5) * (qrWorldSize + 10);
-        particleVelocities[i] = 0.015 + Math.random() * 0.04;
-      }
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      treeMesh = new THREE.InstancedMesh(geo, mat, treeVoxels.length);
+      treeMesh.castShadow = true;
+      treeMesh.receiveShadow = true;
+      treeMesh.frustumCulled = false;
 
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-
-      // Partículas simples de otoño (hojas/lluvia) sin costo alto.
-      const mat = new THREE.PointsMaterial({ color: 0xa85b2d, size: 0.17, transparent: true, opacity: 0.75 });
-      particles = new THREE.Points(geo, mat);
-      particles.visible = false;
-      world.add(particles);
+      treeVoxels.forEach((v, i) => {
+        dummy.position.set(v.x * treeScale, treeBaseY + (v.y + 0.5) * treeScale, v.z * treeScale);
+        dummy.scale.setScalar(treeScale);
+        dummy.updateMatrix();
+        treeMesh.setMatrixAt(i, dummy.matrix);
+      });
+      treeMesh.instanceMatrix.needsUpdate = true;
+      treeMesh.count = isDiorama ? treeVoxels.length : 0;
+      treeAnim.n = isDiorama ? 1 : 0;
+      treeMesh.visible = isDiorama;
+      treeGroup.add(treeMesh);
+      recolorTree();
     }
 
+    function recolorTree() {
+      if (!treeMesh) return;
+      for (let i = 0; i < treeVoxels.length; i++) {
+        const v = treeVoxels[i];
+        if (v.kind === 'trunk') {
+          tmpColor.copy(live.trunk).offsetHSL(0, 0, v.j * 0.08);
+        } else if (v.kind === 'accent') {
+          tmpColor.copy(live.accents).offsetHSL(0, 0, v.j * 0.08);
+        } else {
+          tmpColor.copy(live.leaves).offsetHSL(v.j * 0.02, 0, (v.h - 0.55) * 0.16 + v.j * 0.1);
+        }
+        treeMesh.setColorAt(i, tmpColor);
+      }
+      if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
+    }
+
+    // ---------- QR / terreno ----------
     function buildQr(matrix) {
-      clearGroup(qrGroup);
-      blockEntries = [];
+      disposeMesh(qrMesh);
+      disposeMesh(plinth);
+      disposeMesh(detailMesh);
 
       const moduleCount = matrix.length;
       const fullCount = moduleCount + quietZone * 2;
       qrWorldSize = fullCount * cellSize;
       viewSize = Math.max(22, qrWorldSize * 1.14);
-
-      const darkMaterial = new THREE.MeshBasicMaterial({ color: palettes[currentSeason].dark });
-      const lightMaterial = new THREE.MeshBasicMaterial({ color: palettes[currentSeason].light });
-      const geo = new THREE.BoxGeometry(cellSize, 1, cellSize);
-
-      // Alineación matemática estable: celda (row,col) -> X/Z centrado en 0.
       const centerOffset = (fullCount - 1) / 2;
+      const treeClear = Math.max(2.4, qrWorldSize * 0.06);
+
+      entries = [];
       for (let row = 0; row < fullCount; row++) {
         for (let col = 0; col < fullCount; col++) {
           const inQr = row >= quietZone && row < fullCount - quietZone && col >= quietZone && col < fullCount - quietZone;
           const dark = inQr ? matrix[row - quietZone][col - quietZone] : false;
-          const mesh = new THREE.Mesh(geo, dark ? darkMaterial : lightMaterial);
-
           const x = (col - centerOffset) * cellSize;
           const z = (row - centerOffset) * cellSize;
-
-          mesh.position.set(x, qrFlatHeight / 2, z);
-          mesh.scale.set(0.98, qrFlatHeight, 0.98);
-
-          qrGroup.add(mesh);
-          blockEntries.push({ mesh, dark });
+          const rnd = cellHash(row, col);
+          let dioH = dark ? 0.4 + rnd * 0.6 : 0.2 + rnd * 0.3;
+          if (Math.hypot(x, z) <= treeClear) dioH = 0.3;
+          entries.push({ x, z, dark, dioH, h: qrFlatHeight, from: qrFlatHeight, to: qrFlatHeight, tone: rnd - 0.5 });
         }
       }
+      treeBaseY = 0.3;
+
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      qrMesh = new THREE.InstancedMesh(geo, mat, entries.length);
+      qrMesh.castShadow = isDiorama;
+      qrMesh.receiveShadow = true;
+      qrMesh.frustumCulled = false;
+      world.add(qrMesh);
+
+      // Base de tierra del diorama (queda bajo el plano del QR, invisible en vista plana).
+      plinth = new THREE.Mesh(
+        new THREE.BoxGeometry(qrWorldSize, 3, qrWorldSize),
+        new THREE.MeshLambertMaterial({ color: live.soil })
+      );
+      plinth.position.y = -1.5;
+      plinth.receiveShadow = true;
+      world.add(plinth);
+
+      // Flores y piedritas sobre celdas claras, lejos del árbol.
+      const rng = mulberry32(hashString(urlInput.value || 'x') ^ 0x9e3779b9);
+      const candidates = entries.filter((e) => !e.dark && Math.hypot(e.x, e.z) > treeClear + 3);
+      details = [];
+      for (let i = 0; i < Math.min(40, candidates.length); i++) {
+        const e = candidates.splice(Math.floor(rng() * candidates.length), 1)[0];
+        details.push({ entry: e, kind: rng() < 0.7 ? 'flower' : 'rock', size: 0.26 + rng() * 0.16, j: rng() });
+      }
+      detailMesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshLambertMaterial({ color: 0xffffff }),
+        Math.max(1, details.length)
+      );
+      detailMesh.castShadow = true;
+      detailMesh.frustumCulled = false;
+      world.add(detailMesh);
+
+      // Sol: sombras ajustadas al tamaño del QR.
+      const s = qrWorldSize;
+      sun.position.set(s * 0.55, s * 0.9, s * 0.4);
+      sun.target.position.set(0, 0, 0);
+      sun.shadow.camera.left = -s * 0.75;
+      sun.shadow.camera.right = s * 0.75;
+      sun.shadow.camera.top = s * 0.75;
+      sun.shadow.camera.bottom = -s * 0.75;
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = s * 3;
+      sun.shadow.camera.updateProjectionMatrix();
+
+      blockAnim.p = isDiorama ? 1 : 0;
+      entries.forEach((e) => { e.h = isDiorama ? e.dioH : qrFlatHeight; });
 
       updateCameraFrustum();
-      buildTree();
+      buildTree(hashString(urlInput.value || 'seed'));
       buildParticles();
+      qrDirty = true;
+      colorsDirty = true;
+    }
+
+    function updateQr() {
+      const rotate = blockAnim.p;
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        dummy.position.set(e.x, e.h / 2, e.z);
+        dummy.scale.set(cellSize * 0.995, e.h, cellSize * 0.995);
+        dummy.updateMatrix();
+        qrMesh.setMatrixAt(i, dummy.matrix);
+      }
+      qrMesh.instanceMatrix.needsUpdate = true;
+
+      details.forEach((d, i) => {
+        const size = d.size * rotate;
+        dummy.position.set(d.entry.x, d.entry.h + size / 2, d.entry.z);
+        dummy.scale.set(size, d.kind === 'flower' ? size * 1.6 : size, size);
+        dummy.updateMatrix();
+        detailMesh.setMatrixAt(i, dummy.matrix);
+      });
+      if (details.length) detailMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    function recolor() {
+      const mix = blockAnim.p;
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const flat = e.dark ? live.dark : live.light;
+        const dio = e.dark ? tmpColor2.copy(live.dark).lerp(live.grass, 0.4) : live.grass;
+        tmpColor.copy(flat).lerp(dio, mix);
+        tmpColor.offsetHSL(0, 0, e.tone * 0.07 * mix);
+        qrMesh.setColorAt(i, tmpColor);
+      }
+      if (qrMesh.instanceColor) qrMesh.instanceColor.needsUpdate = true;
+
+      const flowerColors = [live.accents, new THREE.Color('#ffffff'), live.accents];
+      details.forEach((d, i) => {
+        if (d.kind === 'rock') tmpColor.set('#9a9588').offsetHSL(0, 0, d.j * 0.1);
+        else tmpColor.copy(flowerColors[Math.floor(d.j * 3) % 3]);
+        detailMesh.setColorAt(i, tmpColor);
+      });
+      if (detailMesh.instanceColor) detailMesh.instanceColor.needsUpdate = true;
+
+      if (plinth) plinth.material.color.copy(live.soil);
+      recolorTree();
     }
 
     function updateCameraFrustum() {
@@ -470,44 +667,74 @@
       camera.updateProjectionMatrix();
     }
 
-    function animateBlocksToQr() {
-      blockEntries.forEach(({ mesh }) => {
-        gsap.to(mesh.scale, { y: qrFlatHeight, duration: 0.65, ease: 'power2.inOut' });
-        gsap.to(mesh.position, { y: qrFlatHeight / 2, duration: 0.65, ease: 'power2.inOut' });
-      });
+    // ---------- Partículas (pétalos en primavera, hojas en otoño) ----------
+    function buildParticles() {
+      if (particles) {
+        particles.geometry.dispose();
+        particles.material.dispose();
+        world.remove(particles);
+      }
+      const count = 220;
+      const pos = new Float32Array(count * 3);
+      particleVelocities = new Array(count);
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] = (Math.random() - 0.5) * (qrWorldSize + 10);
+        pos[i * 3 + 1] = 5 + Math.random() * 12;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * (qrWorldSize + 10);
+        particleVelocities[i] = 0.012 + Math.random() * 0.035;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const mat = new THREE.PointsMaterial({ color: live.particle, size: 0.2, transparent: true, opacity: 0.85 });
+      particles = new THREE.Points(geo, mat);
+      particles.visible = currentSeason !== 'summer' && isDiorama;
+      world.add(particles);
     }
 
-    function animateBlocksToDiorama() {
-      blockEntries.forEach(({ mesh, dark }) => {
-        const target = dark ? 0.35 + Math.random() * 0.95 : 0.18 + Math.random() * 0.4;
-        gsap.to(mesh.scale, { y: target, duration: 0.9, ease: 'power2.out' });
-        gsap.to(mesh.position, { y: target / 2, duration: 0.9, ease: 'power2.out' });
+    // ---------- Animaciones ----------
+    function animateBlocks(toDiorama) {
+      entries.forEach((e) => {
+        e.from = e.h;
+        e.to = toDiorama ? e.dioH : qrFlatHeight;
+      });
+      const startP = blockAnim.p;
+      gsap.killTweensOf(blockAnim);
+      const proxy = { t: 0 };
+      gsap.to(proxy, {
+        t: 1,
+        duration: toDiorama ? 0.9 : 0.65,
+        ease: toDiorama ? 'power2.out' : 'power2.inOut',
+        onUpdate: () => {
+          entries.forEach((e) => { e.h = e.from + (e.to - e.from) * proxy.t; });
+          blockAnim.p = startP + ((toDiorama ? 1 : 0) - startP) * proxy.t;
+          qrDirty = true;
+          colorsDirty = true;
+        }
       });
     }
 
     function showTree() {
-      treeGroup.visible = true;
-      gsap.to(treeGroup.scale, { x: 1, y: 1, z: 1, duration: 0.9, ease: 'back.out(1.6)' });
-      treeGroup.traverse((node) => {
-        if (node.material && node.material.transparent) {
-          gsap.to(node.material, { opacity: 1, duration: 0.6, ease: 'power2.out' });
-        }
+      if (!treeMesh) return;
+      treeMesh.visible = true;
+      gsap.killTweensOf(treeAnim);
+      gsap.to(treeAnim, {
+        n: 1,
+        duration: 1.6,
+        delay: 0.25,
+        ease: 'power1.out',
+        onUpdate: () => { treeMesh.count = Math.max(1, Math.floor(treeAnim.n * treeVoxels.length)); }
       });
     }
 
     function hideTree() {
-      gsap.to(treeGroup.scale, {
-        x: 0.001,
-        y: 0.001,
-        z: 0.001,
-        duration: 0.4,
+      if (!treeMesh) return;
+      gsap.killTweensOf(treeAnim);
+      gsap.to(treeAnim, {
+        n: 0,
+        duration: 0.45,
         ease: 'power2.inOut',
-        onComplete: () => { treeGroup.visible = false; }
-      });
-      treeGroup.traverse((node) => {
-        if (node.material && node.material.transparent) {
-          gsap.to(node.material, { opacity: 0, duration: 0.35, ease: 'power2.inOut' });
-        }
+        onUpdate: () => { treeMesh.count = Math.floor(treeAnim.n * treeVoxels.length); },
+        onComplete: () => { treeMesh.visible = false; }
       });
     }
 
@@ -521,27 +748,17 @@
       currentSeason = season;
       setSeasonButtonState(season);
       const palette = palettes[season];
-
-      blockEntries.forEach(({ mesh, dark }) => {
-        const target = new THREE.Color(dark ? palette.dark : palette.light);
-        gsap.to(mesh.material.color, { r: target.r, g: target.g, b: target.b, duration: 0.7, ease: 'power1.inOut' });
+      const proxy = { t: 0 };
+      Object.keys(live).forEach((name) => {
+        const target = new THREE.Color(palette[name]);
+        gsap.to(live[name], { r: target.r, g: target.g, b: target.b, duration: 0.75, ease: 'power1.inOut' });
       });
-
-      if (leafMaterial) {
-        const leafColor = new THREE.Color(palette.leaves);
-        gsap.to(leafMaterial.color, { r: leafColor.r, g: leafColor.g, b: leafColor.b, duration: 0.75, ease: 'power1.inOut' });
-      }
-      if (trunkMaterial) {
-        const trunkColor = new THREE.Color(palette.trunk);
-        gsap.to(trunkMaterial.color, { r: trunkColor.r, g: trunkColor.g, b: trunkColor.b, duration: 0.75, ease: 'power1.inOut' });
-      }
+      gsap.to(proxy, { t: 1, duration: 0.8, onUpdate: () => { colorsDirty = true; } });
 
       if (particles) {
-        const pColor = new THREE.Color(palette.particle);
-        gsap.to(particles.material.color, { r: pColor.r, g: pColor.g, b: pColor.b, duration: 0.65, ease: 'power1.inOut' });
-        particles.visible = season === 'autumn';
+        particles.material.color.copy(live.particle);
+        particles.visible = season !== 'summer' && isDiorama;
       }
-
       document.documentElement.style.setProperty('--accent', palette.uiAccent);
     }
 
@@ -550,43 +767,30 @@
       toggleViewBtn.textContent = diorama ? 'Tap to see QR code' : 'Tap to see the tree';
       gsap.fromTo(toggleViewBtn, { scale: 0.97 }, { scale: 1, duration: 0.32, ease: 'back.out(2.4)' });
 
-      // Cambio de vista: pose ortográfica top-down <-> pose isométrica fija.
       const distance = Math.max(30, qrWorldSize * 1.35);
-      const targetPos = diorama
-        ? { x: distance, y: distance, z: distance }
-        : { x: 0, y: 80, z: 0 };
-      const targetUp = diorama
-        ? { x: 0, y: 1, z: 0 }
-        : { x: 0, y: 0, z: -1 };
+      const targetPos = diorama ? { x: distance, y: distance, z: distance } : { x: 0, y: 80, z: 0 };
+      const targetUp = diorama ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: -1 };
 
-      gsap.to(camera.position, {
-        ...targetPos,
-        duration: 1,
-        ease: 'power2.inOut',
-        onUpdate: () => camera.lookAt(0, 0, 0)
-      });
-
-      gsap.to(camera.up, {
-        ...targetUp,
-        duration: 1,
-        ease: 'power2.inOut',
-        onUpdate: () => camera.lookAt(0, 0, 0)
-      });
-
+      gsap.to(camera.position, { ...targetPos, duration: 1, ease: 'power2.inOut', onUpdate: () => camera.lookAt(0, 0, 0) });
+      gsap.to(camera.up, { ...targetUp, duration: 1, ease: 'power2.inOut', onUpdate: () => camera.lookAt(0, 0, 0) });
       gsap.to(camera, {
-        zoom: diorama ? 1.15 : 1,
+        zoom: diorama ? 0.86 : 1,
         duration: 1,
         ease: 'power2.inOut',
         onUpdate: () => camera.updateProjectionMatrix()
       });
 
-      if (diorama) {
-        animateBlocksToDiorama();
-        showTree();
-      } else {
-        animateBlocksToQr();
-        hideTree();
+      // Al volver al QR, el diorama regresa a su ángulo original (por el camino corto).
+      const twoPi = Math.PI * 2;
+      if (!diorama) {
+        world.rotation.y = ((world.rotation.y % twoPi) + twoPi * 1.5) % twoPi - Math.PI;
+        gsap.to(world.rotation, { y: 0, duration: 0.8, ease: 'power2.inOut' });
       }
+
+      qrMesh.castShadow = diorama;
+      animateBlocks(diorama);
+      if (particles) particles.visible = diorama && currentSeason !== 'summer';
+      if (diorama) showTree(); else hideTree();
     }
 
     function regenerateQrFromInput() {
@@ -596,14 +800,6 @@
         urlInput.value = normalized;
         buildQr(matrix);
         applySeason(currentSeason);
-        if (isDiorama) {
-          animateBlocksToDiorama();
-          showTree();
-        } else {
-          animateBlocksToQr();
-          hideTree();
-          setView(false);
-        }
         setStatus('QR actualizado correctamente.');
       } catch (error) {
         setStatus(error.message || 'No se pudo generar el QR.', true);
@@ -613,6 +809,26 @@
     function onResize() {
       renderer.setSize(window.innerWidth, window.innerHeight);
       updateCameraFrustum();
+    }
+
+    // ---------- Giro del diorama con el puntero ----------
+    function setupDrag() {
+      const el = renderer.domElement;
+      el.addEventListener('pointerdown', (e) => {
+        if (!isDiorama) return;
+        dragState.active = true;
+        dragState.x = e.clientX;
+        gsap.killTweensOf(world.rotation);
+        el.setPointerCapture(e.pointerId);
+      });
+      el.addEventListener('pointermove', (e) => {
+        if (!dragState.active) return;
+        world.rotation.y += (e.clientX - dragState.x) * 0.008;
+        dragState.x = e.clientX;
+      });
+      const stop = () => { dragState.active = false; };
+      el.addEventListener('pointerup', stop);
+      el.addEventListener('pointercancel', stop);
     }
 
     function init() {
@@ -629,9 +845,7 @@
         }
       });
 
-      toggleViewBtn.addEventListener('click', () => {
-        setView(!isDiorama);
-      });
+      toggleViewBtn.addEventListener('click', () => setView(!isDiorama));
 
       seasonButtons.forEach((button) => {
         button.addEventListener('click', () => {
@@ -641,30 +855,42 @@
       });
 
       window.addEventListener('resize', onResize);
+      setupDrag();
+
+      // Atajos para capturas/pruebas: #tree abre el diorama, #autumn / #spring fijan la estación.
+      const hash = location.hash.slice(1).split(',');
+      if (hash.includes('autumn') || hash.includes('spring')) {
+        const season = hash.includes('autumn') ? 'autumn' : 'spring';
+        Object.keys(live).forEach((name) => live[name].set(palettes[season][name]));
+        applySeason(season);
+      }
+      if (hash.includes('tree')) {
+        setView(true);
+        gsap.globalTimeline.totalProgress(1);
+      }
     }
 
     function tick() {
       requestAnimationFrame(tick);
 
+      if (qrDirty) { updateQr(); qrDirty = false; }
+      if (colorsDirty) { recolor(); colorsDirty = false; }
+
       if (particles && particles.visible) {
         const attr = particles.geometry.getAttribute('position');
+        const t = performance.now() * 0.001;
         for (let i = 0; i < attr.count; i++) {
           let y = attr.array[i * 3 + 1];
           y -= particleVelocities[i];
-          if (y < 0.2) {
-            y = 6 + Math.random() * 10;
+          attr.array[i * 3] += Math.sin(t + i) * 0.006;
+          if (y < 0.3) {
+            y = 8 + Math.random() * 12;
             attr.array[i * 3] = (Math.random() - 0.5) * (qrWorldSize + 10);
             attr.array[i * 3 + 2] = (Math.random() - 0.5) * (qrWorldSize + 10);
           }
           attr.array[i * 3 + 1] = y;
         }
         attr.needsUpdate = true;
-      }
-
-      if (isDiorama && treeGroup.visible) {
-        treeGroup.rotation.y = Math.sin(performance.now() * 0.00045) * 0.08;
-      } else {
-        treeGroup.rotation.y *= 0.86;
       }
 
       camera.lookAt(0, 0, 0);
