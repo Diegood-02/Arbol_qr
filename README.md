@@ -5,17 +5,16 @@ Aplicación web estática que genera un código QR voxel en Three.js y alterna e
 - **Vista QR** top-down plana y escaneable.
 - **Vista diorama 3D** isométrica con árbol procedural centrado.
 
-Incluye transición animada con GSAP, cambio de estaciones (Spring/Summer/Autumn) y partículas en otoño.
+Árbol voxel procedural (único por URL) con sombras, base de diorama y detalles; se puede girar arrastrando. Incluye transición animada con GSAP, cambio de estaciones (Spring/Summer/Autumn) y partículas en otoño.
 
 ## Ejecutar
 
 No requiere build tools.
 
-1. Abre `/home/runner/work/Arbol_qr/Arbol_qr/index.html` directamente en un navegador moderno, **o** sirve la carpeta como estático.
+1. Abre `index.html` directamente en un navegador moderno, **o** sirve la carpeta como estático.
 2. Si quieres servir localmente con Python:
 
 ```bash
-cd /home/runner/work/Arbol_qr/Arbol_qr
 python -m http.server 8000
 ```
 
